@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# oc-window — OpenCode TUI полосой в нижней трети экрана, тайлингом (не поверх).
+#
+# Зачем: панель внутри Hermes видна не всегда, а плавающее окно поверх мешает —
+# перекрывает чат и перехватывает мышь. Здесь TUI встаёт отдельным ТАЙЛОВЫМ окном:
+# Hermes сжимается сверху, TUI занимает нижнюю треть во всю ширину. Окно живёт
+# ровно столько, сколько идёт прогон: сторож (oc-tui-reap) гасит TUI через
+# OC_TUI_GRACE секунд простоя, foot закрывается вместе с ним.
+#
+# Использование:
+#   oc-window <метка> <файл-задачи> [каталог]
+#
+# Механика: foot с app-id "oc-tui-dock" открывается тайлом, затем окно
+# переставляется вниз (togglesplit) и растягивается до трети высоты монитора.
+# Выравнивание идёт с проверками: dispatch до того, как окно смаплено, молча
+# уходит в другое окно, поэтому фокус и раскладка подтверждаются, а не
+# предполагаются. Фокус возвращается прежнему окну.
+set -euo pipefail
+
+label=${1:?использование: oc-window <метка> <файл-задачи> [каталог]}
+file=${2:?не указан файл с задачей}
+dir=${3:-$PWD}
+
+[[ -r "$file" ]] || { echo "нет файла задачи: $file" >&2; exit 2; }
+
+export OC_TUI_GRACE=${OC_TUI_GRACE:-25}
+
+CLASS=oc-tui-dock
+
+active_class() {
+  hyprctl activewindow -j 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("class",""))' 2>/dev/null || true
+}
+
+# геометрия окна: "x y w h" или пусто
+geom() {
+  hyprctl clients -j 2>/dev/null | python3 -c '
+import json,sys
+cls=sys.argv[1]
+for c in json.load(sys.stdin):
+    if c.get("class")==cls:
+        a=c.get("at") or [0,0]; s=c.get("size") or [0,0]
+        print(a[0],a[1],s[0],s[1]); break
+' "$CLASS" 2>/dev/null || true
+}
+
+prev_addr=$(hyprctl activewindow -j 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("address",""))' 2>/dev/null || true)
+
+foot --app-id=$CLASS \
+  --title="OpenCode · $label" \
+  --working-directory="$dir" \
+  -e "$HOME/.local/bin/oc-tui" "$label" "$file" "$dir" &
+dock_pid=$!
+
+# 1. Ждём окно и добиваемся фокуса на нём (до ~10 с).
+got=0
+for _ in $(seq 1 40); do
+  sleep 0.25
+  [[ -n $(geom) ]] || continue
+  hyprctl dispatch "hl.dsp.focus({ window = \"class:$CLASS\" })" >/dev/null 2>&1 || true
+  sleep 0.2
+  if [[ $(active_class) == "$CLASS" ]]; then got=1; break; fi
+done
+
+if (( got == 1 )); then
+  mon_h=$(hyprctl monitors -j | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["height"])')
+  target=$(( mon_h / 3 ))
+  full_w=$(hyprctl monitors -j | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["width"])')
+
+  # 2. Если окна стоят бок о бок — переставить друг под друга.
+  read -r _x _y w _h <<<"$(geom)"
+  if (( w < full_w - 200 )); then
+    hyprctl dispatch 'hl.dsp.layout("togglesplit")' >/dev/null 2>&1 || true
+    sleep 0.4
+  fi
+
+  # 3. Подогнать высоту под треть монитора (в тайлинге рост — отрицательная дельта).
+  for _ in $(seq 1 6); do
+    read -r _x _y _w h <<<"$(geom)"
+    delta=$(( target - h ))
+    (( delta > 20 || delta < -20 )) || break
+    hyprctl dispatch "hl.dsp.window.resize({ x = 0, y = $((-delta)), relative = true, window = \"class:$CLASS\" })" >/dev/null 2>&1 || true
+    sleep 0.35
+  done
+
+  # 4. Вернуть фокус тому окну, где человек работал.
+  if [[ -n ${prev_addr:-} && $prev_addr != "null" ]]; then
+    hyprctl dispatch "hl.dsp.focus({ window = \"address:$prev_addr\" })" >/dev/null 2>&1 || true
+  fi
+fi
+
+wait "$dock_pid"

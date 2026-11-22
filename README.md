@@ -36,6 +36,7 @@ cd apps/desktop && npm run pack     # or: npm run build && npm run dist
 |---|---|
 | `oc` | Run OpenCode headlessly with a short label: `oc <label> <prompt-file> [opencode run flags]`. The prompt comes from a file, so the mirrored terminal tab has a readable name instead of the whole command line. |
 | `oc-tui` | Start the OpenCode TUI *with* a task and mark it: `oc-tui <label> <prompt-file> [dir]`. Uses `opencode --prompt`, exports `OC_TUI=1`, and spawns its own reaper for that PID. This is the "watch it work" mode — colours and expanded tool calls, mirrored read-only into the Hermes terminal pane. |
+| `oc-window` | OpenCode TUI as a real tiled window in the bottom third of the screen (`oc-window <label> <prompt-file> [dir]`). Uses `oc-tui` inside `foot`, then aligns the window with `hl.dsp` dispatches, and lets the reaper close it when the run goes idle. |
 | `oc-tui-reap` | Kill agent-launched TUIs once their session has been idle: `--watch <pid> [--grace 120]` (steward for one TUI) or a one-shot sweep over every `OC_TUI=1` process. TUIs without the marker (your own) are never touched. |
 | `oc-watch` | Follow another session's OpenCode run as text (reads `~/.local/share/opencode/opencode.db`), printing `… думает:` / `✓ shell:` lines and switching to a newer session by itself. |
 | `oc-open` | Open the real interactive TUI in a floating `foot` window (`-s <session-id>` to resume one), reused if already open. |
