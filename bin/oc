@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# oc — запустить OpenCode как задачу с короткой меткой.
+#
+# Зачем: имя вкладки в панели терминала Hermes = командная строка процесса.
+# Если передавать промпт аргументом, вкладка называется всей командой и её
+# невозможно различить. Здесь промпт читается из файла, поэтому в строке
+# остаются только метка и путь.
+#
+# usage: oc <label> <prompt-file> [доп. флаги opencode run...]
+#   oc "text stats" /tmp/oc/task.md
+#   oc "i18n" ~/work/task.md --model opencode-go/deepseek-v4-pro
+set -euo pipefail
+
+label=${1:-}
+file=${2:-}
+if [[ -z $label || -z $file ]]; then
+  echo "usage: oc <label> <prompt-file> [opencode run flags...]" >&2
+  exit 2
+fi
+shift 2
+
+if [[ ! -r $file ]]; then
+  echo "oc: не читается файл задачи: $file" >&2
+  exit 2
+fi
+
+printf '=== opencode · %s · %s ===\n\n' "$label" "$(date '+%H:%M:%S')"
+exec opencode run --thinking --title "$label" "$@" "$(cat -- "$file")"

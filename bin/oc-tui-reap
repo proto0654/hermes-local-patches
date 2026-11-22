@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""oc-tui-reap — kill OpenCode TUIs the agent left open after their session went idle.
+
+The TUI never exits on its own: when a task finishes it returns to the prompt and
+stays alive forever. Agent-launched TUIs carry `OC_TUI=1` in their environment
+(see the launcher in the skill), so this reaper can find them without touching a
+TUI the person started by hand in their own tab.
+
+usage: oc-tui-reap [--grace SECONDS] [--dry-run]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import signal
+import sqlite3
+import sys
+import time
+
+DB = os.path.expanduser("~/.local/share/opencode/opencode.db")
+MARK = b"OC_TUI=1"
+
+
+def agent_tuis() -> list[tuple[int, str]]:
+    """(pid, cwd) for every live process whose environment carries the marker."""
+    out: list[tuple[int, str]] = []
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        try:
+            with open(f"/proc/{pid}/environ", "rb") as handle:
+                env = handle.read()
+            if MARK not in env:
+                continue
+            cwd = os.readlink(f"/proc/{pid}/cwd")
+        except (FileNotFoundError, PermissionError, ProcessLookupError):
+            continue
+        out.append((pid, cwd))
+    return out
+
+
+def last_activity(cwd: str) -> float | None:
+    """Newest session update (epoch seconds) for sessions in `cwd`."""
+    try:
+        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=5)
+        row = con.execute(
+            "select max(time_updated) from session_v2 where directory = ?", (cwd,)
+        ).fetchone()
+        con.close()
+    except Exception:
+        return None
+    if not row or not row[0]:
+        return None
+    return row[0] / 1000.0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--grace", type=float, default=120.0, help="idle seconds before killing")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--watch", type=int, default=0, help="watch ONE marked TUI pid and exit with it")
+    ap.add_argument("--interval", type=float, default=30.0, help="poll seconds in --watch mode")
+    args = ap.parse_args()
+
+    if args.watch:
+        return watch(args.watch, args.grace, args.interval, args.dry_run)
+
+    now = time.time()
+    killed = 0
+    for pid, cwd in agent_tuis():
+        last = last_activity(cwd)
+        idle = None if last is None else now - last
+        if idle is not None and idle < args.grace:
+            print(json.dumps({"pid": pid, "cwd": cwd, "idle_s": round(idle), "action": "keep"}))
+            continue
+        print(json.dumps({"pid": pid, "cwd": cwd, "idle_s": None if idle is None else round(idle), "action": "kill"}))
+        if args.dry_run:
+            continue
+        try:
+            os.kill(pid, signal.SIGTERM)
+            killed += 1
+        except ProcessLookupError:
+            pass
+    print(json.dumps({"killed": killed, "dry_run": args.dry_run}))
+    return 0
+
+
+def watch(pid: int, grace: float, interval: float, dry_run: bool) -> int:
+    """Steward ONE marked TUI: exits when it does, kills it once its session goes idle.
+
+    Idle is measured from the LATER of the session's last write and this watcher's
+    start, so a freshly launched TUI always gets the full grace period to receive
+    its prompt instead of being killed because the directory's previous session
+    was already idle.
+
+    Started next to the launch, so nothing polls the machine when no marked TUI
+    exists — there is no periodic timer any more.
+    """
+    since = time.time()
+    while True:
+        try:
+            cwd = os.readlink(f"/proc/{pid}/cwd")
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            print(json.dumps({"pid": pid, "action": "gone"}))
+            return 0
+        last = max(last_activity(cwd) or 0.0, since)
+        idle = time.time() - last
+        if idle >= grace:
+            print(json.dumps({"pid": pid, "cwd": cwd, "idle_s": round(idle), "action": "kill"}))
+            if not dry_run:
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+            return 0
+        time.sleep(interval)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""oc-watch — живой хвост сессии OpenCode из чужой сессии Hermes.
+
+Запускается как фоновая задача Hermes: попадает вкладкой в панель терминала и
+печатает поток рассуждений/операций той сессии OpenCode, которая сейчас идёт
+(или последней, если ничего не идёт). Переключение на новую сессию — само.
+
+Почему так: процесс opencode, запущенный другой сессией Hermes (или в окне
+foot), в нашу панель напрямую не попадает — его stdout принадлежит чужому PTY.
+А вот база OpenCode общая: ~/.local/share/opencode/opencode.db.
+
+usage: oc-watch [--tail N] [--interval SEC] [--session ID]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sqlite3
+import sys
+import time
+
+DB = os.path.expanduser("~/.local/share/opencode/opencode.db")
+
+
+def connect() -> sqlite3.Connection:
+    con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=5)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def running_session(con: sqlite3.Connection, pinned: str | None) -> sqlite3.Row | None:
+    if pinned:
+        return con.execute(
+            "select id, title, directory, idle_outcome from session_v2 where id = ?", (pinned,)
+        ).fetchone()
+    row = con.execute(
+        "select id, title, directory, idle_outcome from session_v2 "
+        "where idle_outcome is null order by time_updated desc limit 1"
+    ).fetchone()
+    if row is None:
+        row = con.execute(
+            "select id, title, directory, idle_outcome from session_v2 "
+            "order by time_updated desc limit 1"
+        ).fetchone()
+    return row
+
+
+def stamp(ms) -> str:
+    try:
+        return time.strftime("%H:%M:%S", time.localtime(ms / 1000))
+    except Exception:
+        return "--:--:--"
+
+
+def render(data: str, width: int = 110) -> list[str]:
+    try:
+        msg = json.loads(data)
+    except Exception:
+        return [str(data)[:width]]
+    lines: list[str] = []
+    when = stamp((msg.get("time") or {}).get("created"))
+    if msg.get("outcome"):
+        lines.append(f"{when} ── итог: {msg['outcome']}")
+    for part in msg.get("content") or []:
+        kind = part.get("type")
+        if kind == "text":
+            text = (part.get("text") or "").strip().replace("\n", " ")
+            if text:
+                lines.append(f"{when} ✎ {text[:width]}")
+        elif kind == "reasoning":
+            text = (part.get("text") or "").strip().replace("\n", " ")
+            if text:
+                lines.append(f"{when} … думает: {text[:width]}")
+        elif kind == "tool":
+            state = part.get("state") or {}
+            payload = state.get("input") or {}
+            name = part.get("tool") or part.get("name") or "tool"
+            detail = (
+                payload.get("command")
+                or payload.get("path")
+                or payload.get("pattern")
+                or json.dumps(payload, ensure_ascii=False)
+            )
+            status = state.get("status") or ""
+            mark = {"completed": "✓", "running": "…", "error": "✗"}.get(status, "•")
+            detail = str(detail).replace(chr(10), " ")[:width]
+            # A tool part that has no captured input yet ("{}") is noise — the
+            # completed line right after it carries the real target.
+            lines.append(f"{when} {mark} {name}: {detail}" if detail and detail != "{}" else f"{when} {mark} {name}")
+    return lines
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--tail", type=int, default=12, help="сколько последних сообщений показать при старте")
+    ap.add_argument("--interval", type=float, default=2.0)
+    ap.add_argument("--session", default=None)
+    args = ap.parse_args()
+
+    if not os.path.exists(DB):
+        print(f"oc-watch: нет базы {DB}", file=sys.stderr)
+        return 2
+
+    con = connect()
+    session = running_session(con, args.session)
+    if session is None:
+        print("oc-watch: сессий OpenCode не найдено")
+        return 1
+
+    print(f"=== opencode · {session['title']} · {session['id']}")
+    print(f"=== {session['directory']} · следим за потоком (Ctrl+C / закрыть вкладку — стоп)")
+    print()
+
+    seen: set[int] = set()
+    rows = list(
+        con.execute(
+            "select seq, data from session_message where session_id = ? order by seq desc limit ?",
+            (session["id"], args.tail),
+        )
+    )
+    for row in rows[::-1]:
+        seen.add(row["seq"])
+        for line in render(row["data"]):
+            print(line)
+    sys.stdout.flush()
+
+    try:
+        while True:
+            time.sleep(args.interval)
+            current = running_session(con, args.session)
+            if current is None:
+                continue
+            if current["id"] != session["id"]:
+                print()
+                print(f"=== переключился на новую сессию: {current['title']} · {current['id']}")
+                print()
+                session = current
+                seen.clear()
+            for row in con.execute(
+                "select seq, data from session_message where session_id = ? order by seq",
+                (session["id"],),
+            ):
+                if row["seq"] in seen:
+                    continue
+                seen.add(row["seq"])
+                for line in render(row["data"]):
+                    print(line)
+            sys.stdout.flush()
+    except KeyboardInterrupt:
+        return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,48 @@
+From 6d485d969b802e101368770aa7b44cc212ea427b Mon Sep 17 00:00:00 2001
+From: proto0654 <proto0654@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 04:22:43 +0300
+Subject: [PATCH 3/3] docs(reference): list reveal_terminal_tab in the
+ desktop_ui toolset
+
+---
+ website/docs/reference/tools-reference.md    | 3 ++-
+ website/docs/reference/toolsets-reference.md | 2 +-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/website/docs/reference/tools-reference.md b/website/docs/reference/tools-reference.md
+index 44db9c8993..6adf2f3afa 100644
+--- a/website/docs/reference/tools-reference.md
++++ b/website/docs/reference/tools-reference.md
+@@ -8,7 +8,7 @@ description: "Authoritative reference for Hermes built-in tools, grouped by tool
+ 
+ This page documents Hermes' built-in tools, grouped by toolset. Availability varies by platform, credentials, and enabled toolsets.
+ 
+-**Quick counts (current registry):** ~86 tools — 10 browser tools (core) + 2 CDP-gated browser tools, 4 file tools, 4 Home Assistant tools, 2 terminal tools (`terminal`, `process`), 12 desktop-GUI tools (`read_terminal`, `close_terminal`, `open_preview`, `close_preview`, `read_preview`, `drive_preview`, `annotate_preview`, `read_window_below`, `focus_pane`, `react_to_message`, `tour`, `tip` — desktop-app sessions only), 2 web tools, 5 Feishu tools, 7 Spotify tools (registered by the bundled `spotify` plugin), 5 Yuanbao tools, 12 kanban tools (registered when the kanban dispatcher spawns the agent), 3 project tools (desktop/GUI sessions), 2 Discord tools, 3 video tools (`video_generate`, `xai_video_edit`, `xai_video_extend`), and a handful of standalone tools (`memory`, `clarify`, `delegate_task`, `execute_code`, `cronjob`, `session_search`, `skill_view`/`skill_manage`/`skills_list`, `text_to_speech`, `image_generate`, `vision_analyze`, `video_analyze`, `todo`, `computer_use`, `x_search`).
++**Quick counts (current registry):** ~86 tools — 10 browser tools (core) + 2 CDP-gated browser tools, 4 file tools, 4 Home Assistant tools, 2 terminal tools (`terminal`, `process`), 13 desktop-GUI tools (`read_terminal`, `close_terminal`, `reveal_terminal_tab`, `open_preview`, `close_preview`, `read_preview`, `drive_preview`, `annotate_preview`, `read_window_below`, `focus_pane`, `react_to_message`, `tour`, `tip` — desktop-app sessions only), 2 web tools, 5 Feishu tools, 7 Spotify tools (registered by the bundled `spotify` plugin), 5 Yuanbao tools, 12 kanban tools (registered when the kanban dispatcher spawns the agent), 3 project tools (desktop/GUI sessions), 2 Discord tools, 3 video tools (`video_generate`, `xai_video_edit`, `xai_video_extend`), and a handful of standalone tools (`memory`, `clarify`, `delegate_task`, `execute_code`, `cronjob`, `session_search`, `skill_view`/`skill_manage`/`skills_list`, `text_to_speech`, `image_generate`, `vision_analyze`, `video_analyze`, `todo`, `computer_use`, `x_search`).
+ 
+ :::tip MCP Tools
+ In addition to built-in tools, Hermes can load tools dynamically from MCP servers. MCP tools appear with the prefix `mcp__<server>__` (e.g., `mcp__github__create_issue` for the `github` MCP server). See [MCP Integration](/user-guide/features/mcp) for configuration.
+@@ -202,6 +202,7 @@ messaging, and cron sessions.
+ | `drive_preview` | Interact with the page open in the in-app browser: `elements` inventories what's clickable and typable (each with a ref that names it, like `btn-sign-in` or `inp-email`, plus role, label, and value), then `click`, `hover`, `type`, `scroll`, and `press` act on a ref, and `back`/`forward`/`reload` drive the pane's history. The pointer and keyboard are real input, so hover menus open. A ref lasts until the page navigates, including across a re-render that rebuilds the element, so after the first inventory every action answers with just a delta — what was added, removed, changed, or rebound — instead of the whole page again. | — |
+ | `annotate_preview` | Outline an element in the in-app browser and leave the mark up until it's removed — the deliberate counterpart to the transient cues `drive_preview` draws as it works. `add` marks a ref with an optional short label, `remove` takes one down, `clear` takes them all. Marks follow their element and vanish with it, so a navigation clears them. | — |
+ | `read_window_below` | Identify the OS window directly underneath the Hermes desktop window — app name, title, bounds (metadata only, never pixels). On macOS, other apps' titles appear only when Screen Recording is already granted; the tool never prompts for it. | — |
++| `reveal_terminal_tab` | Front the read-only terminal tab that mirrors a background process (the same tab the status stack opens). Active session only; never types into the shell. | — |
+ | `focus_pane` | Reveal and focus a pane in the Hermes desktop app (chat, files, terminal, review, sessions). | — |
+ | `react_to_message` | React to a message with a single emoji, iMessage-tapback style. Opt-in via Settings → Appearance (`display.message_reactions`). | — |
+ | `tour` | Give a live guided tour: dim the screen, highlight an element, and attach a narrated popover (driver.js). Works on the Hermes app's own UI and on any page open in the preview pane; `targets` discovers what's on screen, `show` narrates step-by-step, `start` hands the user Next/Prev controls. | — |
+diff --git a/website/docs/reference/toolsets-reference.md b/website/docs/reference/toolsets-reference.md
+index c6925facb0..00ebf830be 100644
+--- a/website/docs/reference/toolsets-reference.md
++++ b/website/docs/reference/toolsets-reference.md
+@@ -71,7 +71,7 @@ Or in-session:
+ | `video_gen` | `video_generate`, `xai_video_edit`, `xai_video_extend` | Text-to-video and image-to-video via plugin-registered backends (xAI Grok-Imagine, FAL.ai Veo 3.1 / Pixverse v6 / Kling O3). Pass `image_url` to animate an image; omit it for text-to-video. `xai_video_edit` / `xai_video_extend` are provider-specific edit/extend tools, gated on xAI Imagine credentials. |
+ | `kanban` | `kanban_attach`, `kanban_attach_url`, `kanban_attachments`, `kanban_block`, `kanban_comment`, `kanban_complete`, `kanban_create`, `kanban_heartbeat`, `kanban_link`, `kanban_list`, `kanban_request_changes`, `kanban_request_review`, `kanban_show`, `kanban_unblock` | Multi-agent coordination tools. Registered for dispatcher-spawned task workers (`HERMES_KANBAN_TASK`) and for profiles that explicitly list the `kanban` toolset by name (the `all`/`*` wildcard does **not** enable it). Workers mark tasks done, request first-class review, block, heartbeat, comment, and create/link follow-up tasks; orchestrator profiles additionally get board-routing tools like list/unblock. `delegate_task` children are not Kanban run owners: their schema strips/disables this toolset and runtime guards reject direct board mutations, even if parent `HERMES_KANBAN_*` env vars are present. |
+ | `memory` | `memory` | Persistent cross-session memory management. |
+-| `desktop_ui` | `annotate_preview`, `close_preview`, `close_terminal`, `drive_preview`, `focus_pane`, `open_preview`, `react_to_message`, `read_preview`, `read_terminal`, `read_window_below`, `tour` | Affordances that act on the Hermes desktop app itself — read/close the embedded terminal pane, open, read, close, interact with, and annotate the in-app browser, identify the OS window behind the app, reveal a pane, react to a message, run a guided tour (highlight + narrate UI elements in the app or the preview pane). Enabled for sessions whose source is the desktop app, whichever backend it's connected to (local, SSH, URL, or Hermes Cloud). Never present on CLI, TUI, messaging, or cron sessions. |
++| `desktop_ui` | `annotate_preview`, `close_preview`, `close_terminal`, `drive_preview`, `focus_pane`, `open_preview`, `react_to_message`, `read_preview`, `read_terminal`, `read_window_below`, `reveal_terminal_tab`, `tour` | Affordances that act on the Hermes desktop app itself — read/close the embedded terminal pane, open, read, close, interact with, and annotate the in-app browser, identify the OS window behind the app, reveal a pane, react to a message, run a guided tour (highlight + narrate UI elements in the app or the preview pane). Enabled for sessions whose source is the desktop app, whichever backend it's connected to (local, SSH, URL, or Hermes Cloud). Never present on CLI, TUI, messaging, or cron sessions. |
+ | `project` | `project_create`, `project_list`, `project_switch` | Create and switch desktop [Projects](../user-guide/cli.md) (named, multi-folder workspaces). GUI / desktop sessions only. |
+ | `safe` | `image_generate`, `vision_analyze`, `web_extract`, `web_search` (via `includes`) | Read-only research + media generation. No file writes, no terminal, no code execution. |
+ | `search` | `web_search` | Web search only (without extract). |
+-- 
+2.56.0
+

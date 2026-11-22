@@ -1,0 +1,89 @@
+From 2203807a7bae22e25e701e596c918730f3e0cf79 Mon Sep 17 00:00:00 2001
+From: proto0654 <proto0654@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 04:22:17 +0300
+Subject: [PATCH 1/3] fix(desktop): reveal a collapsed terminal pane instead of
+ only flipping the takeover atom
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+focus_pane('terminal') and the agent-side terminal reveal both called
+setTerminalTakeover(true), which is a no-op once the atom is already true and
+does not undo a collapsed tool pane — the tool reported success while nothing
+painted. Reveal now clears the collapse (setPaneCollapsed) and then runs the
+tree-aware reveal.
+---
+ apps/desktop/src/store/pane-focus.test.ts | 14 ++++++++------
+ apps/desktop/src/store/pane-focus.ts      | 11 +++++++++--
+ 2 files changed, 17 insertions(+), 8 deletions(-)
+
+diff --git a/apps/desktop/src/store/pane-focus.test.ts b/apps/desktop/src/store/pane-focus.test.ts
+index 192a6d9418..6733d5a4ad 100644
+--- a/apps/desktop/src/store/pane-focus.test.ts
++++ b/apps/desktop/src/store/pane-focus.test.ts
+@@ -2,16 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
+ 
+ import { revealDesktopPane } from './pane-focus'
+ 
+-const { openReview, revealTreePane, setFileBrowserOpen, setSidebarOpen, setTerminalTakeover } = vi.hoisted(() => ({
++const { openReview, setPaneCollapsed, revealTreePane, setFileBrowserOpen, setSidebarOpen } = vi.hoisted(() => ({
+   openReview: vi.fn(),
++  setPaneCollapsed: vi.fn(),
+   revealTreePane: vi.fn(),
+   setFileBrowserOpen: vi.fn(),
+-  setSidebarOpen: vi.fn(),
+-  setTerminalTakeover: vi.fn()
++  setSidebarOpen: vi.fn()
+ }))
+ 
+-vi.mock('@/app/right-sidebar/store', () => ({ setTerminalTakeover }))
+-vi.mock('@/components/pane-shell/tree/store', () => ({ revealTreePane }))
++vi.mock('@/components/pane-shell/tree/store', () => ({ setPaneCollapsed, revealTreePane }))
+ vi.mock('./layout', () => ({ setFileBrowserOpen, setSidebarOpen }))
+ vi.mock('./review', () => ({ openReview }))
+ 
+@@ -27,8 +26,11 @@ describe('revealDesktopPane', () => {
+     expect(openReview).toHaveBeenCalledOnce()
+     revealDesktopPane('sessions')
+     expect(setSidebarOpen).toHaveBeenCalledWith(true)
++    // Terminal goes through the tree-aware reveal: flipping the takeover atom
++    // alone left a closed pane closed, so the agent's focus_pane silently did
++    // nothing while reporting success.
+     revealDesktopPane('terminal')
+-    expect(setTerminalTakeover).toHaveBeenCalledWith(true)
++    expect(setPaneCollapsed).toHaveBeenCalledWith('terminal', false)
+   })
+ 
+   it('returns false for an unknown pane and touches nothing', () => {
+diff --git a/apps/desktop/src/store/pane-focus.ts b/apps/desktop/src/store/pane-focus.ts
+index 46c1a34dfe..13569ba7d8 100644
+--- a/apps/desktop/src/store/pane-focus.ts
++++ b/apps/desktop/src/store/pane-focus.ts
+@@ -1,7 +1,7 @@
+ import { setTerminalTakeover } from '@/app/right-sidebar/store'
+ import { isLayoutNode, type LayoutNode } from '@/components/pane-shell/tree/model'
+ import { applyLayoutPreset, LAYOUTS_AREA } from '@/components/pane-shell/tree/presets'
+-import { revealTreePane } from '@/components/pane-shell/tree/store'
++import { revealTreePane, setPaneCollapsed } from '@/components/pane-shell/tree/store'
+ import { registry } from '@/contrib/registry'
+ 
+ import { setFileBrowserOpen, setSidebarOpen } from './layout'
+@@ -16,7 +16,14 @@ const PANE_REVEALERS: Record<string, () => void> = {
+   files: () => setFileBrowserOpen(true),
+   review: () => openReview(),
+   sessions: () => setSidebarOpen(true),
+-  terminal: () => setTerminalTakeover(true)
++  // The tool panel collapses to a rail instead of leaving the tree, and
++  // revealTreePane does not undo that: clear the collapse first, then
++  // reveal. A bare reveal (or the opener alone) reported success and
++  // painted nothing once the user had collapsed the pane.
++  terminal: () => {
++    setPaneCollapsed('terminal', false)
++    revealTreePane('terminal')
++  }
+ }
+ 
+ /** Reveal a desktop pane by name. Returns false for an unknown pane. */
+-- 
+2.56.0
+

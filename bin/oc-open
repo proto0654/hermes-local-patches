@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# oc-open — открыть OpenCode (интерактивный TUI) отдельным окном foot и перевести
+# на него фокус. Если окно OpenCode уже открыто — не плодит второе, а фокусирует
+# существующее.
+#
+# usage:
+#   oc-open [каталог]              # новый чат в каталоге (по умолчанию — свежий репо ~/projects)
+#   oc-open -s <session-id> [каталог]  # открыть существующую сессию (в т.ч. идущую сейчас:
+#                                      # видно ход выполнения и можно раскрывать блоки)
+set -euo pipefail
+
+APP_ID=opencode
+SESSION=""
+BG=0
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -s|--session) SESSION=${2:-}; shift 2 ;;
+    --bg) BG=1; shift ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    *) break ;;
+  esac
+done
+DIR=${1:-}
+
+# --bg: отцепиться от вызывающего терминала (агент так и запускает — иначе строка
+# фонового процесса висит в статус-стеке, а её зеркало пустое: foot рисует своё окно).
+if [[ $BG == 1 ]]; then
+  args=()
+  [[ -n $SESSION ]] && args+=(-s "$SESSION")
+  [[ -n $DIR ]] && args+=("$DIR")
+  setsid "$0" "${args[@]}" </dev/null >/dev/null 2>&1 &
+  exit 0
+fi
+
+active_app() {
+  hyprctl activewindow -j 2>/dev/null \
+    | python3 -c 'import json,sys;print((json.load(sys.stdin) or {}).get("class",""))' 2>/dev/null || true
+}
+
+app_windows() {
+  hyprctl clients -j 2>/dev/null \
+    | python3 -c 'import json,sys;print(sum(1 for c in json.load(sys.stdin) if (c.get("class") or "")=="'"$APP_ID"'"))' 2>/dev/null || echo 0
+}
+
+# Hyprland 0.56 на Lua: у окна нет dispatcher'а "focus window", ближайшее —
+# cycle_next. Крутим фокус, пока активным не станет нужный класс.
+cycle_until_active() {
+  local tries=${1:-10}
+  for _ in $(seq 1 "$tries"); do
+    [[ $(active_app) == "$APP_ID" ]] && return 0
+    hyprctl dispatch 'hl.dsp.window.cycle_next()' >/dev/null 2>&1 || return 1
+    sleep 0.15
+  done
+  [[ $(active_app) == "$APP_ID" ]]
+}
+
+# Каталог сессии берём из базы OpenCode, чтобы `-s` открывался в нужном репо.
+if [[ -z $DIR && -n $SESSION ]]; then
+  DIR=$(python3 - "$SESSION" <<'PY' 2>/dev/null || true
+import os, sqlite3, sys
+db = os.path.expanduser("~/.local/share/opencode/opencode.db")
+try:
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    row = con.execute("select directory from session_v2 where id = ?", (sys.argv[1],)).fetchone()
+    print(row[0] if row and row[0] else "")
+except Exception:
+    pass
+PY
+)
+fi
+
+DIR=${DIR:-$(
+  find "$HOME/projects" -maxdepth 3 -type f -path "*/.git/index" -printf '%T@ %h\n' 2>/dev/null \
+    | sort -rn | head -1 | awk '{print $2}' | sed 's|/\.git$||'
+)}
+DIR=${DIR:-$HOME/projects}
+[[ -d $DIR ]] || { echo "oc-open: нет каталога: $DIR" >&2; exit 2; }
+
+if [[ -n $SESSION ]]; then
+  title="opencode: ${SESSION:0:16}"
+  cmd=(opencode -s "$SESSION")
+else
+  title="opencode: $(basename "$DIR")"
+  # Уже открыт и это не резюм конкретной сессии — просто переключаемся.
+  if [[ $(app_windows) -gt 0 ]] && cycle_until_active 12; then
+    exit 0
+  fi
+  cmd=(opencode)
+fi
+
+foot --app-id="$APP_ID" --title="$title" --working-directory="$DIR" -e "${cmd[@]}" &
+foot_pid=$!
+
+# Новое окно появляется не мгновенно; ждём его и переводим фокус на себя.
+for _ in $(seq 1 12); do
+  sleep 0.3
+  [[ $(active_app) == "$APP_ID" ]] && break
+  cycle_until_active 2 || true
+done
+
+wait "$foot_pid"

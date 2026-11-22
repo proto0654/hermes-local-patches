@@ -1,0 +1,240 @@
+From 39bb4e408cd968c1b9eb4d95a3d7d39aa1ce6d92 Mon Sep 17 00:00:00 2001
+From: proto0654 <proto0654@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 04:22:23 +0300
+Subject: [PATCH 2/3] feat(desktop): reveal_terminal_tab tool for
+ background-process mirrors
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+terminal(background=true) already mirrors a process into the in-app terminal
+pane, but the pane may be closed and the mirror's tab unselected. This adds a
+desktop_ui tool that emits terminal.reveal for one process id and the renderer
+handler that fronts that mirror tab — active session only, so a background turn
+never steals the foreground. Never types into the shell.
+---
+ .../gateway-event/desktop-bridge.test.ts      | 50 ++++++++++++++
+ .../gateway-event/desktop-bridge.ts           | 22 +++++-
+ .../tui_gateway/test_gui_surface_toolsets.py  |  1 +
+ tools/terminal_tab_tool.py                    | 67 +++++++++++++++++++
+ tools/tool_search.py                          |  3 +-
+ toolsets.py                                   |  6 +-
+ 6 files changed, 144 insertions(+), 5 deletions(-)
+ create mode 100644 apps/desktop/src/app/session/hooks/use-message-stream/gateway-event/desktop-bridge.test.ts
+ create mode 100644 tools/terminal_tab_tool.py
+
+diff --git a/apps/desktop/src/app/session/hooks/use-message-stream/gateway-event/desktop-bridge.test.ts b/apps/desktop/src/app/session/hooks/use-message-stream/gateway-event/desktop-bridge.test.ts
+new file mode 100644
+index 0000000000..e9254253da
+--- /dev/null
++++ b/apps/desktop/src/app/session/hooks/use-message-stream/gateway-event/desktop-bridge.test.ts
+@@ -0,0 +1,50 @@
++import { beforeEach, describe, expect, it, vi } from 'vitest'
++
++const { openAgentTerminal, revealTreePane } = vi.hoisted(() => ({
++  openAgentTerminal: vi.fn(),
++  revealTreePane: vi.fn(),
++  setPaneCollapsed: vi.fn()
++}))
++
++vi.mock('@/app/right-sidebar/terminal/terminals', () => ({
++  closeAgentTerminalByProc: vi.fn(),
++  openAgentTerminal
++}))
++
++vi.mock('@/components/pane-shell/tree/store', async importOriginal => ({
++  // Partial mock: the bridge imports reach the real tree store through other
++  // modules, so only the reveal entry point is replaced.
++  ...(await importOriginal<typeof import('@/components/pane-shell/tree/store')>()),
++  revealTreePane
++}))
++
++import { handleDesktopBridgeEvent } from './desktop-bridge'
++import type { GatewayEventContext } from './types'
++
++function context(isActiveEvent: boolean): GatewayEventContext {
++  return {
++    deps: {} as GatewayEventContext['deps'],
++    event: { type: 'terminal.reveal' },
++    explicitSid: 's1',
++    fromActiveSource: () => true,
++    isActiveEvent,
++    occurredAt: 1_700_000_100,
++    payload: { process_id: 'proc_abc', title: 'opencode: parity-long' },
++    scheduleConfigRefresh: vi.fn(),
++    sessionId: 's1'
++  }
++}
++
++describe('handleDesktopBridgeEvent terminal.reveal', () => {
++  beforeEach(() => openAgentTerminal.mockClear())
++
++  it('fronts the read-only mirror tab for the session the user is looking at', () => {
++    expect(handleDesktopBridgeEvent(context(true))).toBe(true)
++    expect(openAgentTerminal).toHaveBeenCalledWith('proc_abc', 'opencode: parity-long')
++  })
++
++  it('leaves the foreground alone when the turn belongs to a background session', () => {
++    expect(handleDesktopBridgeEvent(context(false))).toBe(true)
++    expect(openAgentTerminal).not.toHaveBeenCalled()
++  })
++})
+diff --git a/apps/desktop/src/app/session/hooks/use-message-stream/gateway-event/desktop-bridge.ts b/apps/desktop/src/app/session/hooks/use-message-stream/gateway-event/desktop-bridge.ts
+index 1372a1f36e..ba98f9724e 100644
+--- a/apps/desktop/src/app/session/hooks/use-message-stream/gateway-event/desktop-bridge.ts
++++ b/apps/desktop/src/app/session/hooks/use-message-stream/gateway-event/desktop-bridge.ts
+@@ -1,7 +1,8 @@
+ import { readActivePreview } from '@/app/chat/right-rail/preview-reader'
+ import { writeAgentTerminalChunk } from '@/app/right-sidebar/terminal/agent-terminal-stream'
+ import { readActiveTerminal } from '@/app/right-sidebar/terminal/buffer'
+-import { closeAgentTerminalByProc } from '@/app/right-sidebar/terminal/terminals'
++import { closeAgentTerminalByProc, openAgentTerminal } from '@/app/right-sidebar/terminal/terminals'
++import { revealTreePane, setPaneCollapsed } from '@/components/pane-shell/tree/store'
+ import type { PreviewActAction } from '@/lib/preview-act/act-in-page'
+ import type { TourAction, TourStep } from '@/lib/tour'
+ import { $gateway } from '@/store/gateway'
+@@ -246,6 +247,25 @@ export function handleDesktopBridgeEvent(ctx: GatewayEventContext): boolean {
+     return true
+   }
+ 
++  if (event.type === 'terminal.reveal') {
++    // Agent asked to bring a background process's read-only mirror tab to the
++    // front (desktop-gated reveal_terminal_tab tool). The tab is the same one
++    // the status stack opens: live output, no input. Active session only — a
++    // background turn must never move the user's focus.
++    if (isActiveEvent) {
++      openAgentTerminal(
++        typeof payload?.process_id === 'string' ? payload.process_id : '',
++        typeof payload?.title === 'string' ? payload.title : ''
++      )
++      // The tool pane collapses to a rail; neither the takeover atom nor a lone
++      // reveal un-collapses it, so clear the collapse and then reveal.
++      setPaneCollapsed('terminal', false)
++      revealTreePane('terminal')
++    }
++
++    return true
++  }
++
+   if (event.type === 'pane.reveal') {
+     // Agent revealed a pane via the desktop-gated focus_pane tool, in
+     // response to an explicit user request. Active session only — a
+diff --git a/tests/tui_gateway/test_gui_surface_toolsets.py b/tests/tui_gateway/test_gui_surface_toolsets.py
+index 92463fe453..4747f5a294 100644
+--- a/tests/tui_gateway/test_gui_surface_toolsets.py
++++ b/tests/tui_gateway/test_gui_surface_toolsets.py
+@@ -23,6 +23,7 @@ GUI_TOOLS = {
+     "drive_preview",
+     "close_terminal",
+     "focus_pane",
++    "reveal_terminal_tab",
+     "read_terminal",
+     "read_window_below",
+     "react_to_message",
+diff --git a/tools/terminal_tab_tool.py b/tools/terminal_tab_tool.py
+new file mode 100644
+index 0000000000..e2032cb977
+--- /dev/null
++++ b/tools/terminal_tab_tool.py
+@@ -0,0 +1,67 @@
++#!/usr/bin/env python3
++"""Bring a background process's read-only terminal tab to the front in the Hermes
++desktop GUI (``terminal.reveal`` via ``desktop_ui``).
++
++The tab already exists: ``terminal(background=true)`` mirrors a process into the
++in-app terminal pane. That mirror is exactly what the person needs to watch a
++long run — real output, colours, no input — but it is only created in the
++background and the pane may be closed. This tool reveals the pane and selects
++the mirror's tab; it never creates a writable shell.
++
++Only the window that owns the current turn acts, and the renderer honours it only
++for the session on screen, so a background turn never steals the foreground.
++"""
++
++from tools import desktop_ui
++from tools.registry import registry, tool_error
++
++MAX_LABEL_CHARS = 200
++
++
++def reveal_terminal_tab_tool(process_id: str, title: str = "") -> str:
++    """Ask the desktop GUI to reveal ``process_id``'s read-only terminal tab."""
++    process_id = (process_id or "").strip()
++    if not process_id:
++        return tool_error("process_id must not be empty (use the id from terminal(background=true)).")
++    title = (title or "").strip()[:MAX_LABEL_CHARS]
++    return desktop_ui.emit_or_error(
++        "terminal.reveal",
++        {"process_id": process_id, "title": title},
++        "Failed to reveal the terminal tab: ",
++        "Terminal tabs are only available in the Hermes desktop app.",
++        {"success": True, "process_id": process_id},
++    )
++
++
++registry.register(
++    name="reveal_terminal_tab",
++    toolset="desktop_ui",
++    schema={
++        "name": "reveal_terminal_tab",
++        "description": (
++            "Reveal the in-app terminal tab that mirrors a background process the "
++            "agent started (the read-only live view) and bring it to the front. "
++            "Use it when the user should watch a long-running command — for "
++            "example an agent CLI launched with a background terminal — instead of "
++            "a separate window. It never types into the shell."
++        ),
++        "parameters": {
++            "type": "object",
++            "properties": {
++                "process_id": {
++                    "type": "string",
++                    "description": "Background process id (proc_…) whose mirror tab to reveal.",
++                },
++                "title": {
++                    "type": "string",
++                    "description": "Optional tab label override when the mirror is recreated.",
++                },
++            },
++            "required": ["process_id"],
++        },
++    },
++    handler=lambda args, **kw: reveal_terminal_tab_tool(
++        process_id=args.get("process_id", ""), title=args.get("title", "")
++    ),
++    emoji="🖥️",
++)
+diff --git a/tools/tool_search.py b/tools/tool_search.py
+index ab2af9b0e6..762d5055b1 100644
+--- a/tools/tool_search.py
++++ b/tools/tool_search.py
+@@ -129,7 +129,8 @@ _DEFAULT_DEFERRED_TOOLS = frozenset({
+     # Desktop GUI surface (desktop_ui + project toolsets)
+     "drive_preview", "gui_tour", "desktop_preview", "annotate_preview",
+     "show_tip", "setup_mcp", "desktop_project", "close_terminal",
+-    "apply_layout", "read_terminal", "read_window_below", "focus_pane"})
++    "reveal_terminal_tab", "apply_layout", "read_terminal", "read_window_below",
++    "focus_pane"})
+ 
+ 
+ def is_deferrable_tool_name(name: str, defer_tools: Optional[frozenset] = None) -> bool:
+diff --git a/toolsets.py b/toolsets.py
+index d4a33dcf53..81fab6a28a 100644
+--- a/toolsets.py
++++ b/toolsets.py
+@@ -133,9 +133,9 @@ TOOLSETS = {
+     "desktop_ui": _ts(
+         "Desktop GUI affordances — in-app terminal/browser panes, pane focus, "
+         "reactions (GUI sessions only)",
+-        ["read_terminal", "close_terminal", "desktop_preview", "drive_preview",
+-         "annotate_preview", "read_window_below", "focus_pane", "react_to_message",
+-         "setup_mcp", "gui_tour", "show_tip"],
++        ["read_terminal", "close_terminal", "reveal_terminal_tab", "desktop_preview",
++         "drive_preview", "annotate_preview", "read_window_below", "focus_pane",
++         "react_to_message", "setup_mcp", "gui_tour", "show_tip"],
+     ),
+     "clarify": _ts("Ask the user clarifying questions (multiple-choice or open-ended)", ["clarify"]),
+     "code_execution": _ts("Run Python scripts that call tools programmatically (reduces LLM round trips)", ["execute_code"]),
+-- 
+2.56.0
+

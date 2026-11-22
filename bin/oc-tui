@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# oc-tui — запустить OpenCode TUI сразу с задачей, пометить его и нанять сторожа.
+#
+# Зачем: TUI нужен как «живой экран» для делегирования — цветной, с раскрытыми
+# командами (session.verbosity: high). Раньше промпт приходилось вбивать через
+# process submit + Enter; у `opencode` есть --prompt, так что хватает одной
+# команды. Сторож гасит TUI, когда сессия в его каталоге простояла --grace секунд,
+# и умирает вместе с ним — ничего не опрашивается, когда TUI нет.
+#
+# usage: oc-tui <label> <prompt-file> [директория]
+set -euo pipefail
+
+label=${1:-}
+file=${2:-}
+dir=${3:-$PWD}
+
+if [[ -z $label || -z $file ]]; then
+  echo "usage: oc-tui <label> <prompt-file> [directory]" >&2
+  exit 2
+fi
+if [[ ! -r $file ]]; then
+  echo "oc-tui: не читается файл задачи: $file" >&2
+  exit 2
+fi
+if [[ ! -d $dir ]]; then
+  echo "oc-tui: нет каталога: $dir" >&2
+  exit 2
+fi
+
+cd "$dir"
+printf '=== opencode TUI · %s · %s ===\n\n' "$label" "$(date '+%H:%M:%S')"
+
+OC_TUI=1 opencode --prompt "$(cat -- "$file")" &
+pid=$!
+
+unit="oc-tui-watch-$(date +%H%M%S)-$pid"
+systemd-run --user --collect --unit="$unit" \
+  /home/proto/.local/bin/oc-tui-reap --watch "$pid" --grace "${OC_TUI_GRACE:-120}" \
+  >/dev/null 2>&1 || true
+
+wait "$pid"
