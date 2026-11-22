@@ -1,0 +1,11 @@
+[Unit]
+Description=Уводит чужие окна OpenCode (foot) на спец-воркспейс, чтобы они не тайлили рабочий стол
+
+[Service]
+Type=simple
+ExecStart=/home/proto/.local/bin/oc-foot-guard
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

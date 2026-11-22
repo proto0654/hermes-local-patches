@@ -39,6 +39,7 @@ cd apps/desktop && npm run pack     # or: npm run build && npm run dist
 | `oc-window` | OpenCode TUI as a real tiled window in the bottom third of the screen (`oc-window <label> <prompt-file> [dir]`). Uses `oc-tui` inside `foot`, then aligns the window with `hl.dsp` dispatches, and lets the reaper close it when the run goes idle. |
 | `oc-tui-reap` | Kill agent-launched TUIs once their session has been idle: `--watch <pid> [--grace 120]` (steward for one TUI) or a one-shot sweep over every `OC_TUI=1` process. TUIs without the marker (your own) are never touched. |
 | `oc-watch` | Follow another session's OpenCode run as text (reads `~/.local/share/opencode/opencode.db`), printing `… думает:` / `✓ shell:` lines and switching to a newer session by itself. |
+| `oc-foot-guard` | Watches Hyprland's event socket and moves foreign OpenCode windows (`foot` with an `OpenCode…` title, e.g. from another Hermes session) to a hidden `special:opencode` workspace so they stop re-tiling the desktop. Own dock windows (`oc-tui-dock`) are ignored. Ships with a systemd user unit in `systemd/`. |
 | `oc-open` | Open the real interactive TUI in a floating `foot` window (`-s <session-id>` to resume one), reused if already open. |
 
 Install:
@@ -63,6 +64,15 @@ scrolls inside the TUI — use the keyboard there.
 
 `low` collapses each run of tools and thoughts into one line; `high` opens the exploration and
 instruction groups, which is what makes a read-only mirror readable.
+
+## Desktop behaviour this expects
+
+- `input:follow_mouse = 0` — focus on click only, so pointer movement over a mirrored or
+  docked TUI does not hand it focus and mouse events.
+- `SUPER + ALT + O` toggles the hidden `special:opencode` workspace where foreign OpenCode
+  windows are parked.
+- Install the guard: `cp systemd/oc-foot-guard.service ~/.config/systemd/user/ &&
+  systemctl --user daemon-reload && systemctl --user enable --now oc-foot-guard`.
 
 ## Notes
 

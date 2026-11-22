@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""Держит чужие окна OpenCode вне текущего тайлинга.
+
+Другая сессия (или сам агент) может запустить `foot -e opencode run …`. Такое окно
+открывается тайлом и перекраивает рабочий стол. Правилом Hyprland это не ловится:
+foot выставляет заголовок уже после маппинга, а правила `workspace` применяются
+на маппинге. Поэтому слушаем события Hyprland и уводим такие окна на скрытый
+спец-воркспейс `special:opencode` (SUPER+ALT+O — показать/убрать).
+
+Наш собственный док (`--app-id=oc-tui-dock`) не трогается: у него другой класс.
+"""
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+import time
+
+SPECIAL = "special:opencode"
+TITLE_RE = re.compile(r"^OpenCode\b")
+OWN_CLASSES = {"oc-tui-dock"}
+
+
+def hyprctl(*args: str) -> str:
+    try:
+        return subprocess.run(
+            ["hyprctl", *args], capture_output=True, text=True, timeout=5
+        ).stdout
+    except Exception:
+        return ""
+
+
+def move_to_special(address: str) -> None:
+    # follow = false: окно уезжает, но фокус и активный воркспейс не переезжают
+    # за ним — иначе следующее новое окно открывается уже на спец-воркспейсе.
+    hyprctl(
+        "dispatch",
+        f'hl.dsp.window.move({{ window = "address:{address}", workspace = "{SPECIAL}", follow = false }})',
+    )
+
+
+def consider(address: str, cls: str, title: str, seen: dict) -> None:
+    if cls in OWN_CLASSES or cls != "foot":
+        return
+    if not TITLE_RE.match(title or ""):
+        return
+    now = time.time()
+    if now - seen.get(address, 0) < 5:  # не долбим одно окно на каждый title-эвент
+        return
+    seen[address] = now
+    move_to_special(address)
+    print(f"уведено в {SPECIAL}: {address} {title[:48]}", flush=True)
+
+
+def sweep(seen: dict) -> None:
+    """Уже открытые окна — на старте сервиса."""
+    try:
+        clients = json.loads(hyprctl("clients", "-j") or "[]")
+    except Exception:
+        return
+    for c in clients:
+        ws = (c.get("workspace") or {}).get("name", "")
+        if ws == SPECIAL:
+            continue
+        consider(c.get("address", ""), c.get("class", ""), c.get("title", ""), seen)
+
+
+def main() -> None:
+    runtime = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+    if not sig:
+        print("нет HYPRLAND_INSTANCE_SIGNATURE", file=sys.stderr)
+        return 1
+    path = os.path.join(runtime, "hypr", sig, ".socket2.sock")
+
+    seen: dict = {}
+    sweep(seen)
+
+    while True:
+        try:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.connect(path)
+        except OSError as exc:
+            print(f"сокет недоступен ({exc}), жду", file=sys.stderr)
+            time.sleep(2)
+            continue
+        buf = b""
+        try:
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    event = line.decode("utf-8", "replace")
+                    if ">>" not in event:
+                        continue
+                    name, payload = event.split(">>", 1)
+                    parts = payload.split(",")
+                    if name == "openwindow" and len(parts) >= 4:
+                        consider(parts[0], parts[2], ",".join(parts[3:]), seen)
+                    elif name == "windowtitle" and len(parts) >= 2:
+                        addr = parts[0]
+                        title = ",".join(parts[1:])
+                        cls = ""
+                        for c in json.loads(hyprctl("clients", "-j") or "[]"):
+                            if c.get("address") == addr:
+                                cls = c.get("class", "")
+                                break
+                        consider(addr, cls, title, seen)
+        except Exception as exc:  # соединение порвалось — переподключаемся
+            print(f"ошибка сокета: {exc}", file=sys.stderr)
+        finally:
+            sock.close()
+        time.sleep(1)
+
+
+if __name__ == "__main__":
+    sys.exit(main() or 0)
