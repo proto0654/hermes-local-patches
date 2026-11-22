@@ -67,11 +67,16 @@ if (( got == 1 )); then
   full_w=$(hyprctl monitors -j | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["width"])')
 
   # 2. Если окна стоят бок о бок — переставить друг под друга.
-  read -r _x _y w _h <<<"$(geom)"
-  if (( w < full_w - 200 )); then
+  #    Фокус на недавно смапленном окне берётся не с первого раза, поэтому пробуем
+  #    несколько кругов и каждый раз проверяем геометрию, а не верим dispatch.
+  for _ in $(seq 1 6); do
+    read -r _x _y w _h <<<"$(geom)"
+    (( w < full_w - 200 )) || break
+    hyprctl dispatch "hl.dsp.focus({ window = \"class:$CLASS\" })" >/dev/null 2>&1 || true
+    sleep 0.3
     hyprctl dispatch 'hl.dsp.layout("togglesplit")' >/dev/null 2>&1 || true
     sleep 0.4
-  fi
+  done
 
   # 3. Подогнать высоту под треть монитора (в тайлинге рост — отрицательная дельта).
   for _ in $(seq 1 6); do

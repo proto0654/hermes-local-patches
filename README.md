@@ -53,8 +53,13 @@ cp bin/* ~/.local/bin/ && chmod +x ~/.local/bin/oc*
 click-free expansion) comes from the TUI plus this setting in `~/.config/opencode/cli.json`:
 
 ```json
-{ "session": { "verbosity": "high" } }
+{ "session": { "verbosity": "high" }, "mouse": false }
 ```
+
+`mouse: false` turns off terminal mouse capture. With capture on (the default) the TUI
+requests X10/SGR mouse reporting, and pointer movement over a mirrored or docked window gets
+inserted into the prompt as escape-sequence garbage. The cost is that the wheel no longer
+scrolls inside the TUI — use the keyboard there.
 
 `low` collapses each run of tools and thoughts into one line; `high` opens the exploration and
 instruction groups, which is what makes a read-only mirror readable.
