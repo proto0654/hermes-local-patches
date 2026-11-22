@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# oc-delegate — одна точка входа для прогонов OpenCode, смотрит настройку Hermes.
+#
+# Настройка: `opencode.dock_window` в ~/.hermes/config.yaml — галка в
+# Settings → Agent («Show OpenCode runs in their own window docked in the bottom
+# third of the screen»). По умолчанию выключена.
+#
+#   выключено → oc-tui: прогон живёт в панели терминала Hermes
+#   включено  → oc-window: отдельное тайловое окно в нижней трети экрана
+#
+# usage: oc-delegate <метка> <файл-задачи> [каталог]
+set -euo pipefail
+
+if [[ $# -lt 2 ]]; then
+  echo "usage: oc-delegate <метка> <файл-задачи> [каталог]" >&2
+  exit 2
+fi
+
+read -r dock_enabled <<<"$(python3 - <<'PY'
+import os
+try:
+    import yaml
+    path = os.path.expanduser("~/.hermes/config.yaml")
+    with open(path) as fh:
+        cfg = yaml.safe_load(fh) or {}
+except Exception:
+    cfg = {}
+value = (cfg.get("opencode") or {}).get("dock_window")
+print("1" if value else "0")
+PY
+)"
+
+if [[ $dock_enabled == 1 ]] && command -v oc-window >/dev/null 2>&1; then
+  exec oc-window "$@"
+fi
+
+exec oc-tui "$@"

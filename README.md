@@ -17,6 +17,8 @@ On a newer base some hunks may need a rebase.
 | `0002-feat-desktop-reveal_terminal_tab-tool-for-background.patch` | `feat(desktop)`: a `desktop_ui` tool `reveal_terminal_tab(process_id, title?)` that emits `terminal.reveal`, and the renderer handler that fronts the read-only mirror tab of a `terminal(background=true)` process. Active session only, so a background turn never steals the foreground; it never types into the shell. |
 | `0003-docs-reference-list-reveal_terminal_tab-in-the-deskt.patch` | `docs(reference)`: lists the new tool in `tools-reference.md` and `toolsets-reference.md`. |
 
+| `0004-feat-config-opencode-dock-window-toggle.patch` | `feat(config)`: adds `opencode.dock_window` (boolean, default `false`) to `DEFAULT_CONFIG` and to the config schema, so the desktop Settings pane renders it as one toggle under *Agent*. |
+
 Apply:
 
 ```bash
@@ -38,6 +40,7 @@ cd apps/desktop && npm run pack     # or: npm run build && npm run dist
 | `oc-tui` | Start the OpenCode TUI *with* a task and mark it: `oc-tui <label> <prompt-file> [dir]`. Uses `opencode --prompt`, exports `OC_TUI=1`, and spawns its own reaper for that PID. This is the "watch it work" mode — colours and expanded tool calls, mirrored read-only into the Hermes terminal pane. |
 | `oc-window` | OpenCode TUI as a real tiled window in the bottom third of the screen (`oc-window <label> <prompt-file> [dir]`). Uses `oc-tui` inside `foot`, hands the window to `oc-dock-align`, and lets `oc-ptyfilter` close it once the run has been silent for `OC_TUI_GRACE` seconds (the dock sets 25). |
 | `oc-ptyfilter` | Runs a command under a fresh PTY and filters `?1003h` (any-motion mouse reporting) out of its output, keeping click/wheel reporting. `oc-tui` uses it. A background job's stdin is `/dev/null`, so both input and the window size come from `/dev/tty`; without that the TUI renders at a 120x40 fallback and the transcript looks cut off. |
+| `oc-delegate` | Single entry point for a run: reads `opencode.dock_window` from `~/.hermes/config.yaml` and execs `oc-window` (own docked window) or `oc-tui` (terminal pane). `oc-delegate <label> <prompt-file> [dir]`. |
 | `oc-dock-align` | Aligns the dock window into the bottom third (full width) with one `hyprctl --batch` per step — focus + `togglesplit`, then resize. Polls every 25 ms and targets only the *newly appeared* window, so a leftover dock from an earlier run cannot steal the alignment. Visible rearrange: ~0.1 s. |
 | `oc-tui-reap` | Manual sweep over agent-launched TUIs (`OC_TUI=1`). Not needed in the normal path any more: `oc-ptyfilter` closes a TUI by itself once its child has been silent for `OC_TUI_GRACE` seconds — a DB-based idle check could see *another* run in the same directory as active and leave the window hanging. |
 | `oc-watch` | Follow another session's OpenCode run as text (reads `~/.local/share/opencode/opencode.db`), printing `… думает:` / `✓ shell:` lines and switching to a newer session by itself. |
@@ -67,6 +70,17 @@ config is the sledgehammer if you prefer no mouse at all.
 
 `low` collapses each run of tools and thoughts into one line; `high` opens the exploration and
 instruction groups, which is what makes a read-only mirror readable.
+
+## One toggle in Settings
+
+`opencode.dock_window` (Settings → Agent, off by default; `hermes config set opencode.dock_window true`
+from the CLI) decides how a run is shown. `oc-delegate` is the only entry point that matters:
+
+```bash
+oc-delegate "<label>" <prompt-file> [dir]   # dock when the toggle is on, terminal pane when it is off
+```
+
+The flag is read at launch, so flipping it does not touch a run that is already going.
 
 ## Lifetime and timings
 

@@ -1,0 +1,58 @@
+From e5108a885bc9bdc5026dacb8b024b4f7c151cb64 Mon Sep 17 00:00:00 2001
+From: proto0654 <proto0654@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 05:35:28 +0300
+Subject: [PATCH] =?UTF-8?q?feat(config):=20opencode.dock=5Fwindow=20?=
+ =?UTF-8?q?=E2=80=94=20one=20settings=20toggle=20for=20the=20docked=20Open?=
+ =?UTF-8?q?Code=20window?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Off by default. Surfaced through the config schema, so the desktop Settings pane
+renders it as a boolean row; the setting is read by the oc-delegate helper, which
+picks oc-window (own window in the bottom third) or oc-tui (terminal pane).
+---
+ hermes_cli/config_defaults.py   | 7 +++++++
+ hermes_cli/web_server_config.py | 8 ++++++++
+ 2 files changed, 15 insertions(+)
+
+diff --git a/hermes_cli/config_defaults.py b/hermes_cli/config_defaults.py
+index 3451a15287..9bbd2a4e81 100644
+--- a/hermes_cli/config_defaults.py
++++ b/hermes_cli/config_defaults.py
+@@ -1205,6 +1205,13 @@ DEFAULT_CONFIG = {
+         # "mem0", "hindsight", "holographic", "retaindb", "byterover".
+         "provider": "",
+     },
++    # How OpenCode runs are shown. Toggled in Settings; off by default.
++    "opencode": {
++        # true  — the TUI gets its own window docked in the bottom third of the screen
++        #         (oc-window, Hyprland/Linux only)
++        # false — the run stays in the in-app terminal pane (oc-tui)
++        "dock_window": False,
++    },
+     # Subagent delegation — override the provider:model used by delegate_task so children run on a
+     # cheaper/faster model. Uses the same runtime provider resolution as CLI/gateway startup, so
+     # every configured provider is supported.
+diff --git a/hermes_cli/web_server_config.py b/hermes_cli/web_server_config.py
+index d8fc58ed9d..a075c107dc 100644
+--- a/hermes_cli/web_server_config.py
++++ b/hermes_cli/web_server_config.py
+@@ -78,6 +78,14 @@ _SCHEMA_OVERRIDES: Dict[str, Dict[str, Any]] = {
+         "Terminal execution backend",
+         "local", "docker", "ssh", "modal", "daytona", "vercel_sandbox", "singularity",
+     ),
++    "opencode.dock_window": {
++        "type": "boolean",
++        "description": (
++            "Show OpenCode runs in their own window docked in the bottom third of the screen "
++            "(needs the oc-window helper; Linux/Hyprland). Off keeps the run in the terminal pane."
++        ),
++        "category": "agent",
++    },
+     # sync with _SUPPORTED_VERCEL_RUNTIMES in terminal_tool.py
+     "terminal.vercel_runtime": _select("Vercel Sandbox runtime", "node24", "node22", "python3.13"),
+     "terminal.modal_mode": _select("Modal sandbox mode", "sandbox", "function"),
+-- 
+2.56.0
+
