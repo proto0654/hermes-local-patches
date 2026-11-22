@@ -48,6 +48,39 @@ def set_winsize(fd: int, src: int) -> None:
         pass
 
 
+def live_descendants(pid: int):
+    """Живые (не зомби) потомки процесса — запущенные инструменты, сборки и т.п.
+
+    Тишина в выводе ещё не значит «закончил»: агент мог уйти в долгую команду.
+    Пока у него есть живой ребёнок, гасить TUI нельзя.
+    """
+    children = {}
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return []
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/stat", "rb") as fh:
+                fields = fh.read().rsplit(b") ", 1)[1].split()
+        except (OSError, IndexError):
+            continue
+        if fields and fields[0] in (b"Z", b"X"):
+            continue
+        try:
+            children.setdefault(int(fields[1]), []).append(int(entry))
+        except (ValueError, IndexError):
+            continue
+    out, stack = [], [pid]
+    while stack:
+        for child in children.get(stack.pop(), []):
+            out.append(child)
+            stack.append(child)
+    return out
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print(__doc__.strip(), file=sys.stderr)
@@ -115,7 +148,7 @@ def main() -> int:
                     input_open = False  # ввод закрылся — просто перестаём его ждать
                 else:
                     os.write(master, chunk)
-            if IDLE and time.time() - last_output > IDLE:
+            if IDLE and time.time() - last_output > IDLE and not live_descendants(pid):
                 print(f"\n== простой {IDLE:.0f} с — закрываю TUI ==", flush=True)
                 break
     finally:

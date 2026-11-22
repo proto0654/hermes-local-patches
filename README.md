@@ -74,6 +74,11 @@ instruction groups, which is what makes a read-only mirror readable.
   silent before `oc-ptyfilter` closes the TUI. This is an output-idle check per process, not a
   lookup in the shared session DB: with two runs in one directory the DB always looked "active"
   and a finished window could hang.
+- Silence alone is not enough: the filter also requires that the TUI has **no live descendants**.
+  A long tool call (`sleep 40`, a build, a test suite) keeps its child process alive, so it is
+  never killed mid-flight even if that tool prints nothing. Measured: during a real
+  `sleep 40` step the TUI never went silent for 2 s (it animates the tool block), and with
+  `OC_TUI_GRACE=15` the window stayed up for the whole run and closed 15 s after the last byte.
 - Measured on the dock (`oc-window`, 1920x1080): the window appears at ~0.55 s, lands in the
   bottom third at ~0.68 s, and is gone 25 s after the last output. The 0.13 s rearrange is the
   floor for a tiled window — Hyprland cannot open one at a chosen position and ratio.
