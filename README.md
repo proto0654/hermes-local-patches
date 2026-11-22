@@ -76,6 +76,27 @@ instruction groups, which is what makes a read-only mirror readable.
 - Install the guard: `cp systemd/oc-foot-guard.service ~/.config/systemd/user/ &&
   systemctl --user daemon-reload && systemctl --user enable --now oc-foot-guard`.
 
+Exact Hyprland lines these scripts assume (Lua config, Hyprland 0.5x):
+
+```lua
+-- hyprland.lua — the dock must not grab focus when it opens; oc-window aligns it itself
+o.window("oc-tui-dock", { no_initial_focus = true })
+
+-- input.lua — hover no longer focuses, so a mirrored TUI stays passive until clicked
+hl.config({ input = { follow_mouse = 0 } })
+
+-- bindings.lua — peek at the parked foreign windows
+o.bind("SUPER + ALT + O", "OpenCode windows (special workspace)",
+       "hyprctl dispatch 'hl.dsp.workspace.toggle_special(\"opencode\")'")
+```
+
+Gotcha: a plain window rule cannot park the foreign windows —
+`o.window({ class = "^foot$", title = "^OpenCode" }, { workspace = "special:opencode" })`
+never matches, because `foot` sets its title *after* the window is mapped and `workspace`
+rules are applied at map time. Hence `oc-foot-guard`, which listens on Hyprland's event
+socket and moves the window once the title arrives (with `follow = false`, or the next new
+window would open on the special workspace).
+
 ## Notes
 
 - No credentials, tokens, or machine-specific secrets live in this repo; the scripts read the
