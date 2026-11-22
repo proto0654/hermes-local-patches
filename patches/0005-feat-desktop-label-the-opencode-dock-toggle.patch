@@ -1,0 +1,58 @@
+From 3dcc841332311e7fd2911bd7ebaa69f9ee6ccb04 Mon Sep 17 00:00:00 2001
+From: proto0654 <proto0654@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 05:49:02 +0300
+Subject: [PATCH] feat(desktop): label the OpenCode dock toggle and move it
+ under Delegation
+
+A bare "Dock Window" row under Agent (64th of 114) was unfindable. It now sits in
+the Delegation tab with an explicit label, RU included.
+---
+ apps/desktop/src/app/settings/constants.ts | 3 +++
+ apps/desktop/src/i18n/ru.ts                | 3 +++
+ hermes_cli/web_server_config.py            | 2 +-
+ 3 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/apps/desktop/src/app/settings/constants.ts b/apps/desktop/src/app/settings/constants.ts
+index daa1d05cc3..3d7cdd2e94 100644
+--- a/apps/desktop/src/app/settings/constants.ts
++++ b/apps/desktop/src/app/settings/constants.ts
+@@ -383,6 +383,9 @@ export const FIELD_LABELS: Record<string, string> = defineFieldCopy({
+     personality: 'Personality',
+     showReasoning: 'Reasoning Blocks'
+   },
++  opencode: {
++    dockWindow: 'OpenCode Dock Window'
++  },
+   desktop: {
+     repoScanEnabled: 'Automatic Repository Discovery',
+     repoScanRoots: 'Repository Discovery Roots',
+diff --git a/apps/desktop/src/i18n/ru.ts b/apps/desktop/src/i18n/ru.ts
+index bbeac02270..f464c4a23c 100644
+--- a/apps/desktop/src/i18n/ru.ts
++++ b/apps/desktop/src/i18n/ru.ts
+@@ -690,6 +690,9 @@ export const ru = defineLocale({
+       }
+     },
+     fieldLabels: defineFieldCopy({
++      opencode: {
++        dockWindow: 'Окно OpenCode (док)'
++      },
+       model: 'Модель по умолчанию',
+       modelContextLength: 'Окно контекста',
+       fallbackProviders: 'Резервные модели',
+diff --git a/hermes_cli/web_server_config.py b/hermes_cli/web_server_config.py
+index a075c107dc..ec4584036d 100644
+--- a/hermes_cli/web_server_config.py
++++ b/hermes_cli/web_server_config.py
+@@ -84,7 +84,7 @@ _SCHEMA_OVERRIDES: Dict[str, Dict[str, Any]] = {
+             "Show OpenCode runs in their own window docked in the bottom third of the screen "
+             "(needs the oc-window helper; Linux/Hyprland). Off keeps the run in the terminal pane."
+         ),
+-        "category": "agent",
++        "category": "delegation",
+     },
+     # sync with _SUPPORTED_VERCEL_RUNTIMES in terminal_tool.py
+     "terminal.vercel_runtime": _select("Vercel Sandbox runtime", "node24", "node22", "python3.13"),
+-- 
+2.56.0
+

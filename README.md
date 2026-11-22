@@ -17,7 +17,8 @@ On a newer base some hunks may need a rebase.
 | `0002-feat-desktop-reveal_terminal_tab-tool-for-background.patch` | `feat(desktop)`: a `desktop_ui` tool `reveal_terminal_tab(process_id, title?)` that emits `terminal.reveal`, and the renderer handler that fronts the read-only mirror tab of a `terminal(background=true)` process. Active session only, so a background turn never steals the foreground; it never types into the shell. |
 | `0003-docs-reference-list-reveal_terminal_tab-in-the-deskt.patch` | `docs(reference)`: lists the new tool in `tools-reference.md` and `toolsets-reference.md`. |
 
-| `0004-feat-config-opencode-dock-window-toggle.patch` | `feat(config)`: adds `opencode.dock_window` (boolean, default `false`) to `DEFAULT_CONFIG` and to the config schema, so the desktop Settings pane renders it as one toggle under *Agent*. |
+| `0004-feat-config-opencode-dock-window-toggle.patch` | `feat(config)`: adds `opencode.dock_window` (boolean, default `false`) to `DEFAULT_CONFIG` and to the config schema, so the desktop Settings pane renders it as one toggle. |
+| `0005-feat-desktop-label-the-opencode-dock-toggle.patch` | `feat(desktop)`: labels the row "OpenCode Dock Window" (RU: «Окно OpenCode (док)») and files it under *Delegation* instead of a bare "Dock Window" buried mid-list under *Agent*. Needs a desktop rebuild. |
 
 Apply:
 
