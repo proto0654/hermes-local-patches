@@ -37,6 +37,7 @@ cd apps/desktop && npm run pack     # or: npm run build && npm run dist
 | `oc` | Run OpenCode headlessly with a short label: `oc <label> <prompt-file> [opencode run flags]`. The prompt comes from a file, so the mirrored terminal tab has a readable name instead of the whole command line. |
 | `oc-tui` | Start the OpenCode TUI *with* a task and mark it: `oc-tui <label> <prompt-file> [dir]`. Uses `opencode --prompt`, exports `OC_TUI=1`, and spawns its own reaper for that PID. This is the "watch it work" mode — colours and expanded tool calls, mirrored read-only into the Hermes terminal pane. |
 | `oc-window` | OpenCode TUI as a real tiled window in the bottom third of the screen (`oc-window <label> <prompt-file> [dir]`). Uses `oc-tui` inside `foot`, then aligns the window with `hl.dsp` dispatches, and lets the reaper close it when the run goes idle. |
+| `oc-ptyfilter` | Runs a command under a fresh PTY and filters `?1003h` (any-motion mouse reporting) out of its output, keeping click/wheel reporting. `oc-tui` uses it; a background job's stdin is `/dev/null`, so input comes from `/dev/tty`. |
 | `oc-tui-reap` | Kill agent-launched TUIs once their session has been idle: `--watch <pid> [--grace 120]` (steward for one TUI) or a one-shot sweep over every `OC_TUI=1` process. TUIs without the marker (your own) are never touched. |
 | `oc-watch` | Follow another session's OpenCode run as text (reads `~/.local/share/opencode/opencode.db`), printing `… думает:` / `✓ shell:` lines and switching to a newer session by itself. |
 | `oc-foot-guard` | Watches Hyprland's event socket and moves foreign OpenCode windows (`foot` with an `OpenCode…` title, e.g. from another Hermes session) to a hidden `special:opencode` workspace so they stop re-tiling the desktop. Own dock windows (`oc-tui-dock`) are ignored. Ships with a systemd user unit in `systemd/`. |
@@ -54,13 +55,14 @@ cp bin/* ~/.local/bin/ && chmod +x ~/.local/bin/oc*
 click-free expansion) comes from the TUI plus this setting in `~/.config/opencode/cli.json`:
 
 ```json
-{ "session": { "verbosity": "high" }, "mouse": false }
+{ "session": { "verbosity": "high" } }
 ```
 
-`mouse: false` turns off terminal mouse capture. With capture on (the default) the TUI
-requests X10/SGR mouse reporting, and pointer movement over a mirrored or docked window gets
-inserted into the prompt as escape-sequence garbage. The cost is that the wheel no longer
-scrolls inside the TUI — use the keyboard there.
+Mouse capture stays on (wheel and clicks work), but `oc-tui` wraps the CLI in `oc-ptyfilter`,
+which strips the TUI's `?1003h` request ("report every pointer motion") out of its output and
+leaves `?1000h` / `?1002h` / `?1006h` intact. Result: the wheel scrolls, clicks work, and
+hovering over the window no longer feeds SGR garbage into the prompt. `"mouse": false` in the
+config is the sledgehammer if you prefer no mouse at all.
 
 `low` collapses each run of tools and thoughts into one line; `high` opens the exploration and
 instruction groups, which is what makes a read-only mirror readable.

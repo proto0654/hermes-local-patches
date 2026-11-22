@@ -30,7 +30,10 @@ fi
 cd "$dir"
 printf '=== opencode TUI · %s · %s ===\n\n' "$label" "$(date '+%H:%M:%S')"
 
-OC_TUI=1 opencode --prompt "$(cat -- "$file")" &
+# oc-ptyfilter вырезает из вывода TUI запрос `?1003h` (любое движение мыши):
+# колесо и клики остаются, а наведение курсора больше не сыплет SGR-мусором
+# в строку ввода. Подробности — в шапке oc-ptyfilter.
+OC_TUI=1 oc-ptyfilter opencode --prompt "$(cat -- "$file")" &
 pid=$!
 
 unit="oc-tui-watch-$(date +%H%M%S)-$pid"

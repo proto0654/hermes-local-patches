@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""Запускает команду под PTY и вырезает из её вывода запрос any-motion мыши.
+
+Зачем: TUI OpenCode включает `?1003h` — «присылай каждое движение курсора».
+Любое наведение на окно превращается в поток SGR-последовательностей, и часть
+из них TUI вставляет в строку ввода как мусор. Но для колеса нужны только
+`?1000h` / `?1002h` / `?1006h` (клик и колесо), без `?1003h` (движение).
+Поэтому фильтруем ровно `?1003h`: колесо и клики работают, наведение молчит.
+
+usage: oc-ptyfilter <команда> [аргументы…]
+"""
+import fcntl
+import os
+import pty
+import select
+import signal
+import struct
+import sys
+import termios
+import tty
+
+DROP = b"\x1b[?1003h"
+
+
+def set_winsize(fd: int) -> None:
+    try:
+        size = fcntl.ioctl(sys.stdin.fileno(), termios.TIOCGWINSZ, b"\0" * 8)
+    except OSError:
+        size = b""
+    rows, cols = struct.unpack("HHHH", size)[:2] if len(size) == 8 else (0, 0)
+    if not rows or not cols:
+        # TUI без размеров падает на старте (exit 241), поэтому подставляем разумные.
+        size = struct.pack("HHHH", 40, 120, 0, 0)
+    try:
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, size)
+    except OSError:
+        pass
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+
+    pid, master = pty.fork()
+    if pid == 0:  # ребёнок
+        os.execvp(sys.argv[1], sys.argv[1:])
+
+    stdin_fd = sys.stdin.fileno()
+    stdout_fd = sys.stdout.fileno()
+    input_fd = stdin_fd
+    # У фонового процесса stdin часто /dev/null: тогда читаем ввод из /dev/tty,
+    # иначе select сразу видит EOF и мы бы убили TUI на старте.
+    if not os.isatty(stdin_fd):
+        try:
+            input_fd = os.open("/dev/tty", os.O_RDWR)
+        except OSError:
+            input_fd = -1
+    set_winsize(master)
+
+    old_attrs = None
+    if input_fd >= 0 and os.isatty(input_fd):
+        old_attrs = termios.tcgetattr(input_fd)
+        tty.setraw(input_fd)
+
+    def on_winch(_signum, _frame):
+        set_winsize(master)
+
+    signal.signal(signal.SIGWINCH, on_winch)
+
+    tail = b""
+    input_open = input_fd >= 0
+    try:
+        while True:
+            watch = [master] + ([input_fd] if input_open else [])
+            try:
+                ready, _, _ = select.select(watch, [], [])
+            except InterruptedError:
+                continue
+            if master in ready:
+                try:
+                    data = os.read(master, 65536)
+                except OSError:
+                    break
+                if not data:
+                    break
+                buf = tail + data
+                # держим хвост, который может быть началом последовательности
+                keep = 0
+                for length in range(min(len(DROP) - 1, len(buf)), 0, -1):
+                    if buf.endswith(DROP[:length]):
+                        keep = length
+                        break
+                body, tail = (buf[:-keep], buf[-keep:]) if keep else (buf, b"")
+                os.write(stdout_fd, body.replace(DROP, b""))
+            if input_open and input_fd in ready:
+                try:
+                    chunk = os.read(input_fd, 65536)
+                except OSError:
+                    chunk = b""
+                if not chunk:
+                    input_open = False  # ввод закрылся — просто перестаём его ждать
+                else:
+                    os.write(master, chunk)
+    finally:
+        if old_attrs is not None:
+            termios.tcsetattr(input_fd, termios.TCSADRAIN, old_attrs)
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        _, status = os.waitpid(pid, 0)
+    return os.waitstatus_to_exitcode(status) if status else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
