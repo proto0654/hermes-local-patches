@@ -36,7 +36,7 @@ cd apps/desktop && npm run pack     # or: npm run build && npm run dist
 |---|---|
 | `oc` | Run OpenCode headlessly with a short label: `oc <label> <prompt-file> [opencode run flags]`. The prompt comes from a file, so the mirrored terminal tab has a readable name instead of the whole command line. |
 | `oc-tui` | Start the OpenCode TUI *with* a task and mark it: `oc-tui <label> <prompt-file> [dir]`. Uses `opencode --prompt`, exports `OC_TUI=1`, and spawns its own reaper for that PID. This is the "watch it work" mode — colours and expanded tool calls, mirrored read-only into the Hermes terminal pane. |
-| `oc-window` | OpenCode TUI as a real tiled window in the bottom third of the screen (`oc-window <label> <prompt-file> [dir]`). Uses `oc-tui` inside `foot`, then aligns the window with `hl.dsp` dispatches, and lets the reaper close it when the run goes idle. |
+| `oc-window` | OpenCode TUI as a real tiled window in the bottom third of the screen (`oc-window <label> <prompt-file> [dir]`). Uses `oc-tui` inside `foot`, hands the window to `oc-dock-align`, and lets `oc-ptyfilter` close it once the run has been silent for `OC_TUI_GRACE` seconds (the dock sets 25). |
 | `oc-ptyfilter` | Runs a command under a fresh PTY and filters `?1003h` (any-motion mouse reporting) out of its output, keeping click/wheel reporting. `oc-tui` uses it. A background job's stdin is `/dev/null`, so both input and the window size come from `/dev/tty`; without that the TUI renders at a 120x40 fallback and the transcript looks cut off. |
 | `oc-dock-align` | Aligns the dock window into the bottom third (full width) with one `hyprctl --batch` per step — focus + `togglesplit`, then resize. Polls every 25 ms and targets only the *newly appeared* window, so a leftover dock from an earlier run cannot steal the alignment. Visible rearrange: ~0.1 s. |
 | `oc-tui-reap` | Manual sweep over agent-launched TUIs (`OC_TUI=1`). Not needed in the normal path any more: `oc-ptyfilter` closes a TUI by itself once its child has been silent for `OC_TUI_GRACE` seconds — a DB-based idle check could see *another* run in the same directory as active and leave the window hanging. |
@@ -67,6 +67,20 @@ config is the sledgehammer if you prefer no mouse at all.
 
 `low` collapses each run of tools and thoughts into one line; `high` opens the exploration and
 instruction groups, which is what makes a read-only mirror readable.
+
+## Lifetime and timings
+
+- `OC_TUI_GRACE` (seconds, default 120; `oc-window` exports 25) — how long the child may be
+  silent before `oc-ptyfilter` closes the TUI. This is an output-idle check per process, not a
+  lookup in the shared session DB: with two runs in one directory the DB always looked "active"
+  and a finished window could hang.
+- Measured on the dock (`oc-window`, 1920x1080): the window appears at ~0.55 s, lands in the
+  bottom third at ~0.68 s, and is gone 25 s after the last output. The 0.13 s rearrange is the
+  floor for a tiled window — Hyprland cannot open one at a chosen position and ratio.
+
+Commits that introduced these behaviours: `bace908` (batched alignment + idle close inside the
+filter), `276e8d9` (window size taken from `/dev/tty`, otherwise the TUI renders at a 120x40
+fallback and the transcript looks cut off).
 
 ## Desktop behaviour this expects
 
