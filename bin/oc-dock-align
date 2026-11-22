@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""Выравнивает окно-док OpenCode: нижняя треть экрана, во всю ширину.
+
+Hyprland не умеет открывать тайловое окно в заданном месте и размере — dwindle
+всегда делит по длинной стороне контейнера, поэтому новое окно сначала встаёт
+сбоку. Здесь перестройка сводится к паре кадров: как только окно появилось,
+одним batch-вызовом отправляются focus + togglesplit (или resize), батч занимает
+~10 мс, поэтому промежуточное состояние почти не видно.
+
+usage: oc-dock-align <class> [адрес для возврата фокуса] [адреса-исключения,...]
+"""
+import json
+import subprocess
+import sys
+import time
+
+
+def hyprctl(*args: str) -> str:
+    try:
+        return subprocess.run(["hyprctl", *args], capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return ""
+
+
+def batch(*dispatches: str) -> None:
+    if not dispatches:
+        return
+    hyprctl("--batch", "; ".join(f"dispatch {d}" for d in dispatches))
+
+
+def dock(cls: str, skip: set):
+    """Свежайшее окно класса cls, кроме тех, что уже были до запуска.
+
+    Без этого старый незакрытый док (например, от прошлого прогона) перехватывал
+    бы выравнивание, и новое окно оставалось бы сбоку.
+    """
+    try:
+        clients = json.loads(hyprctl("clients", "-j") or "[]")
+    except json.JSONDecodeError:
+        return None
+    found = [c for c in clients if c.get("class") == cls and c.get("address") not in skip]
+    if not found:
+        return None
+    return max(found, key=lambda c: c.get("focusHistoryID", 0) * -1)
+
+
+def monitor_of(c: dict) -> dict:
+    try:
+        monitors = json.loads(hyprctl("monitors", "-j") or "[]")
+    except json.JSONDecodeError:
+        return {}
+    idx = c.get("monitor")
+    if isinstance(idx, int) and 0 <= idx < len(monitors):
+        return monitors[idx]
+    for m in monitors:
+        if m.get("focused"):
+            return m
+    return monitors[0] if monitors else {}
+
+
+def focus_dock(cls: str) -> None:
+    batch(f'hl.dsp.focus({{ window = "class:{cls}" }})')
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    cls = sys.argv[1]
+    restore = sys.argv[2] if len(sys.argv) > 2 else ""
+    skip = set(filter(None, (sys.argv[3] if len(sys.argv) > 3 else "").split(",")))
+    if restore in ("null", ""):
+        restore = ""
+
+    deadline = time.time() + 20
+    c = None
+    while time.time() < deadline:
+        time.sleep(0.025)
+        c = dock(cls, skip)
+        if c:
+            break
+    if not c:
+        return 0
+
+    mon = monitor_of(c)
+    full_w = mon.get("width", 1920)
+    target_h = mon.get("height", 1080) // 3
+
+    # бок о бок -> друг под друга, затем высота в треть
+    for _ in range(20):
+        c = dock(cls, skip)
+        if not c:
+            break
+        w = (c.get("size") or [0, 0])[0]
+        h = (c.get("size") or [0, 0])[1]
+        if w < full_w - 200:
+            focus_dock(cls)
+            batch('hl.dsp.layout("togglesplit")')
+        elif abs(target_h - h) > 15:
+            focus_dock(cls)
+            batch(
+                "hl.dsp.window.resize({ x = 0, y = %d, relative = true, window = \"class:%s\" })"
+                % (-(target_h - h), cls)
+            )
+        else:
+            break
+        time.sleep(0.03)
+
+    if restore:
+        batch(f'hl.dsp.focus({{ window = "address:{restore}" }})')
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

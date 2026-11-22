@@ -30,15 +30,15 @@ fi
 cd "$dir"
 printf '=== opencode TUI · %s · %s ===\n\n' "$label" "$(date '+%H:%M:%S')"
 
+# Сторож — сам фильтр: когда ребёнок замолчал на OC_TUI_GRACE секунд, он его гасит
+# и окно закрывается. Это точнее старой сверки по базе сессий: в одном каталоге
+# может быть несколько прогонов, и база показывала «активно» чужую сессию.
+export OC_TUI_GRACE=${OC_TUI_GRACE:-120}
+
 # oc-ptyfilter вырезает из вывода TUI запрос `?1003h` (любое движение мыши):
 # колесо и клики остаются, а наведение курсора больше не сыплет SGR-мусором
 # в строку ввода. Подробности — в шапке oc-ptyfilter.
 OC_TUI=1 oc-ptyfilter opencode --prompt "$(cat -- "$file")" &
 pid=$!
-
-unit="oc-tui-watch-$(date +%H%M%S)-$pid"
-systemd-run --user --collect --unit="$unit" \
-  /home/proto/.local/bin/oc-tui-reap --watch "$pid" --grace "${OC_TUI_GRACE:-120}" \
-  >/dev/null 2>&1 || true
 
 wait "$pid"

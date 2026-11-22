@@ -17,9 +17,12 @@ import signal
 import struct
 import sys
 import termios
+import time
 import tty
 
 DROP = b"\x1b[?1003h"
+# Молчание ребёнка дольше этого — прогон закончен: гасим TUI, окно закрывается.
+IDLE = float(os.environ.get("OC_TUI_GRACE", "0") or 0)
 
 
 def set_winsize(fd: int, src: int) -> None:
@@ -78,11 +81,12 @@ def main() -> int:
 
     tail = b""
     input_open = input_fd >= 0
+    last_output = time.time()
     try:
         while True:
             watch = [master] + ([input_fd] if input_open else [])
             try:
-                ready, _, _ = select.select(watch, [], [])
+                ready, _, _ = select.select(watch, [], [], 0.5)
             except InterruptedError:
                 continue
             if master in ready:
@@ -101,6 +105,7 @@ def main() -> int:
                         break
                 body, tail = (buf[:-keep], buf[-keep:]) if keep else (buf, b"")
                 os.write(stdout_fd, body.replace(DROP, b""))
+                last_output = time.time()
             if input_open and input_fd in ready:
                 try:
                     chunk = os.read(input_fd, 65536)
@@ -110,6 +115,9 @@ def main() -> int:
                     input_open = False  # ввод закрылся — просто перестаём его ждать
                 else:
                     os.write(master, chunk)
+            if IDLE and time.time() - last_output > IDLE:
+                print(f"\n== простой {IDLE:.0f} с — закрываю TUI ==", flush=True)
+                break
     finally:
         if old_attrs is not None:
             termios.tcsetattr(input_fd, termios.TCSADRAIN, old_attrs)
