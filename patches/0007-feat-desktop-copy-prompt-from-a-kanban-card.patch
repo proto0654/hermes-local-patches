@@ -1,0 +1,99 @@
+From 145d92256b43c6294767a3e65e79764cd55592f8 Mon Sep 17 00:00:00 2001
+From: proto0654 <proto0654@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 16:58:07 +0300
+Subject: [PATCH] feat(desktop): copy a ready-to-paste prompt from a kanban
+ card
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Each card carries a small copy affordance next to its short id (hover to
+reveal). It puts a prompt on the clipboard naming the card, its board and its
+project:
+
+    Выполним карточку t_1202f684 из канбана «ИстАгро Дон», проект «ИстАгро Дон»
+
+Board name and project come from the cached /boards query (no request per
+card). The button stops mousedown/click propagation because the card is
+draggable and opens the drawer on click. Needs a desktop rebuild.
+---
+ apps/desktop/src/plugins/kanban/board.tsx | 45 ++++++++++++++++++++++-
+ 1 file changed, 44 insertions(+), 1 deletion(-)
+
+diff --git a/apps/desktop/src/plugins/kanban/board.tsx b/apps/desktop/src/plugins/kanban/board.tsx
+index be4c98ff4a..89bb43032b 100644
+--- a/apps/desktop/src/plugins/kanban/board.tsx
++++ b/apps/desktop/src/plugins/kanban/board.tsx
+@@ -50,11 +50,13 @@ import {
+   useQuery,
+   useQueryClient,
+   useValue,
+-  WorkspacePageHeaderControl
++  WorkspacePageHeaderControl,
++  writeClipboardText
+ } from '@hermes/plugin-sdk'
+ import {
+   type CSSProperties,
+   type DragEvent as ReactDragEvent,
++  type MouseEvent as ReactMouseEvent,
+   type ReactNode,
+   useEffect,
+   useMemo,
+@@ -152,6 +154,36 @@ function Meta({ children, icon }: { children: ReactNode; icon: string }) {
+ 
+ function CardFooter({ arc, task }: { arc: ArcState | null; task: KanbanTask }) {
+   const k = useKanban()
++  const [idCopied, setIdCopied] = useState(false)
++  const scope = useKanbanScope()
++  const slug = useValue($boardSlug)
++  // Cached once for the whole board: the copy affordance pastes a prompt the
++  // agent can act on without a round-trip to ask "which board is this?".
++  const { data: boards } = useQuery({ queryFn: fetchBoards, queryKey: boardsKey(scope), staleTime: 30_000 })
++  const boardMeta = boards?.boards.find(b => b.slug === (slug || boards?.current))
++
++  const copyId = (event: ReactMouseEvent) => {
++    // The card itself is draggable and opens the drawer on click: the copy
++    // affordance must neither start a drag nor bubble into those handlers.
++    event.preventDefault()
++    event.stopPropagation()
++    const boardName = boardMeta?.name || slug || boards?.current || ''
++    const project = boardMeta?.project_name || ''
++
++    // A board usually carries its project's name; repeating it reads silly.
++    const where = [boardName && `из канбана «${boardName}»`, project && project !== boardName && `проект «${project}»`]
++      .filter(Boolean)
++      .join(', ')
++
++    // The title leads: Hermes names the new session from the first user
++    // message, so a prompt that starts with the card title gives a session
++    // list that can be read, not just a column of `t_…` ids.
++    const subject = (task.title || '').trim() || `карточка ${task.id}`
++    void writeClipboardText(`${subject} — выполняем карточку ${task.id}${where ? ` ${where}` : ''}`)
++    setIdCopied(true)
++    window.setTimeout(() => setIdCopied(false), 1500)
++  }
++
+   const created = ago(task.created_at)
+   const links = task.link_counts ? task.link_counts.parents + task.link_counts.children : 0
+   const fallback = useDefaultAssignee()
+@@ -243,6 +275,17 @@ function CardFooter({ arc, task }: { arc: ArcState | null; task: KanbanTask }) {
+           <span className="text-(--ui-text-quaternary)">{created}</span>
+         ) : null}
+         <span className="min-w-0 truncate font-mono text-(--ui-text-quaternary)">{shortId(task.id)}</span>
++        <Tip label={idCopied ? k.copiedId(task.id) : k.copyTaskId}>
++          <button
++            aria-label={k.copyTaskId}
++            className="shrink-0 rounded p-0.5 text-(--ui-text-quaternary) opacity-0 transition-opacity hover:bg-(--chrome-action-hover) hover:text-(--ui-text-secondary) focus-visible:opacity-100 group-hover:opacity-100"
++            onClick={copyId}
++            onMouseDown={event => event.stopPropagation()}
++            type="button"
++          >
++            <Codicon name={idCopied ? 'check' : 'copy'} size="0.7rem" />
++          </button>
++        </Tip>
+       </div>
+     </div>
+   )
+-- 
+2.56.0
+
