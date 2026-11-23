@@ -28,6 +28,11 @@ cd /path/to/hermes-agent
 git am /path/to/hermes-local-patches/patches/*.patch
 ```
 
+Backend-only patches (`0001`, `0006`) take effect after the gateway restarts: run
+`systemctl --user restart hermes-gateway` from a shell **outside** the agent. The running
+gateway refuses to stop itself (the restart command would die with it). Rebuild the desktop
+only for the renderer patches (`0002`–`0005`).
+
 The desktop UI is Electron code, so a rebuild is required for the renderer half:
 
 ```bash
