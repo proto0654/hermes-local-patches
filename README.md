@@ -39,6 +39,13 @@ The desktop UI is Electron code, so a rebuild is required for the renderer half:
 cd apps/desktop && npm run pack     # or: npm run build && npm run dist
 ```
 
+### `bin/kanban-done` — close a board card with generated evidence
+
+`kd t_1234abcd "что сделано"` finds the card's board and project, stamps the time and the
+operator into the result line and calls `hermes kanban complete`. The alias `kd` goes into
+`~/.bashrc`. Needed because a completion without evidence is refused, and the board drawer
+has no field for one (see patch `0006`).
+
 ### `bin/` — OpenCode helpers for the Hermes desktop workflow
 
 | Script | Purpose |
