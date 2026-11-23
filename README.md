@@ -19,6 +19,7 @@ On a newer base some hunks may need a rebase.
 
 | `0004-feat-config-opencode-dock-window-toggle.patch` | `feat(config)`: adds `opencode.dock_window` (boolean, default `false`) to `DEFAULT_CONFIG` and to the config schema, so the desktop Settings pane renders it as one toggle. |
 | `0005-feat-desktop-label-the-opencode-dock-toggle.patch` | `feat(desktop)`: labels the row "OpenCode Dock Window" (RU: «Окно OpenCode (док)») and files it under *Delegation* instead of a bare "Dock Window" buried mid-list under *Agent*. Needs a desktop rebuild. |
+| `0006-fix-kanban-stamp-evidence-on-human-done.patch` | `fix(kanban)`: closing a card by hand from the board was impossible — `complete_task()` accepted only running/ready/blocked/review (so a `todo`/`triage` drop failed with "status transition to 'done' not valid"), and the drawer has no field for a result (so the drop failed with "has no result or summary evidence"). Backlog states are closable now, and the dashboard's explicit operator action stamps `Закрыто вручную из борды — <time>, закрыл <profile>`. Worker completions still need real evidence. Backend-only, no desktop rebuild. |
 
 Apply:
 

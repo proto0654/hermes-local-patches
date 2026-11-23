@@ -1,0 +1,84 @@
+From dbbaafb27197371003f2449e2a04de5e578fc23e Mon Sep 17 00:00:00 2001
+From: proto0654 <proto0654@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 16:02:57 +0300
+Subject: [PATCH] fix(kanban): let a human close cards from the board, with
+ stamped evidence
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Two blockers in the human path:
+
+* complete_task() only accepted running/ready/blocked/review, so dragging a
+  backlog card (todo/triage) into Done failed with 'status transition to done
+  not valid from current state'. Backlog states are closable now.
+* The drawer has no field for a completion result, so the same drop failed
+  with 'completion blocked: <id> has no result or summary evidence'. The
+  dashboard PATCH path is an explicit operator action (force=True), so it
+  stamps 'Закрыто вручную из борды — <time>, закрыл <profile>' instead.
+
+Worker completions (no force) still require real evidence.
+---
+ hermes_cli/kanban_db.py                |  2 +-
+ plugins/kanban/dashboard/plugin_api.py | 23 ++++++++++++++++++++++-
+ 2 files changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/hermes_cli/kanban_db.py b/hermes_cli/kanban_db.py
+index 4e61aeece3..aa40a3ee84 100644
+--- a/hermes_cli/kanban_db.py
++++ b/hermes_cli/kanban_db.py
+@@ -2702,7 +2702,7 @@ def complete_task(
+                        block_kind   = NULL,
+                        block_recurrences = 0
+                  WHERE id = ?
+-                   AND status IN ('running', 'ready', 'blocked', 'review')
++                   AND status IN ('running', 'ready', 'blocked', 'review', 'todo', 'triage')
+                 """
+         params: tuple = (result, now, task_id)
+         if expected_run_id is not None:
+diff --git a/plugins/kanban/dashboard/plugin_api.py b/plugins/kanban/dashboard/plugin_api.py
+index a572f7c06c..979f391005 100644
+--- a/plugins/kanban/dashboard/plugin_api.py
++++ b/plugins/kanban/dashboard/plugin_api.py
+@@ -13,6 +13,7 @@ import asyncio
+ import importlib
+ import json
+ import logging
++import os
+ import re
+ import sqlite3
+ import time
+@@ -589,9 +590,29 @@ def _drag_to(conn, task_id: str, s: str) -> bool:
+ # Status verb dispatch shared by PATCH /tasks/{id} and POST /tasks/bulk: (conn, task_id,
+ # payload) -> ok. ``review`` uses request_review (never a block, so it can't trip unblock-loop
+ # detection) and ``done`` pass ``force=True``: a dashboard action is a human override of a live worker claim.
++_MANUAL_DONE_NOTE = "Закрыто вручную"
++
++
++def _manual_completion_result(conn: sqlite3.Connection, task_id: str) -> str:
++    """Evidence line for a card a human drags to Done with nothing typed in.
++
++    ``complete_task`` refuses an empty completion, but the board UI has no field for a
++    result — so an operator drop would fail with "no result or summary evidence". The
++    operator IS the record (same idea as review approvals), so the note is stamped here:
++    who closed it, when, and on which board.
++    """
++    row = conn.execute("SELECT result FROM tasks WHERE id = ?", (task_id,)).fetchone()
++    stored = row["result"] if row else None
++    if isinstance(stored, str) and stored.strip():
++        return stored
++    stamp = time.strftime("%Y-%m-%d %H:%M")
++    return f"{_MANUAL_DONE_NOTE} из борды — {stamp}, закрыл {os.environ.get('HERMES_PROFILE') or os.environ.get('USER') or 'manual'}"
++
++
+ _STATUS_HANDLERS: dict[str, Any] = {
+     "done": lambda conn, tid, p: kanban_db.complete_task(
+-        conn, tid, result=p.result, summary=p.summary, metadata=p.metadata, force=True),
++        conn, tid, result=p.result or _manual_completion_result(conn, tid),
++        summary=p.summary, metadata=p.metadata, force=True),
+     "blocked": lambda conn, tid, p: kanban_db.block_task(conn, tid, reason=getattr(p, "block_reason", None)),
+     "scheduled": lambda conn, tid, p: kanban_db.schedule_task(conn, tid, reason=getattr(p, "block_reason", None)),
+     "review": lambda conn, tid, p: kanban_db.request_review(
+-- 
+2.56.0
+
